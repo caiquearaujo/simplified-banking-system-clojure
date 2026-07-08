@@ -174,3 +174,9 @@ When designing the tests, I needed to define the shape of the input and output o
 Regarding the tests, I made a conscious decision to make them more "declarative". What I mean by that is that I explicitly designed the step-by-step process. I could have used helpers to do this in some cases, for example "fresh" (to create a repository with an account) or "funded" (to create an account with a pre-deposited value). I decided not to do it that way because I believe that tests should be read as a story, and direct manipulations are more relevant than helpers that package meaning. Of course, if we were in a more complex ecosystem, helpers would probably be the ideal choice.
 
 Initial tests are done.
+
+### Update 2
+
+- [X] Implementations for `banking.validations`;
+- [ ] Implementations for `banking.accounts`;
+- [ ] Implementations for `banking.repositories`.
