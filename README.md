@@ -179,6 +179,8 @@ Initial tests are done.
 
 - [X] Implementations for `banking.validations`;
 - [X] Implementations for `banking.accounts`;
-- [ ] Implementations for `banking.repositories`.
+- [X] Implementations for `banking.repositories`.
 
 > The implementation phase of `banking.accounts` was the right time to define the shape of the effects that will be returned, as well as all the behavior. As I said before, the essential thing for us here is to persist the state; the rest maybe can be implemented sometime in the future, it's optional and doesn't violate the use cases.
+
+> While implementing `banking.repositories` it's very important to distinguish two things here. Despite the name "repository" given to the collection of accounts, they are different objects. The collection of accounts is data in memory that undergoes atomic effects and mutations; the repository, which supposedly stores this data, is something else entirely. For this reason, I changed the name from "repository" in `banking.accounts` to "ledger". Furthermore, `banking.repositories` now globally store all accounts and transactions in memory. In a real-world environment, commits would be granular based on the type of "persist", but we won't go into that here. Here commits only checks if should persist or not.

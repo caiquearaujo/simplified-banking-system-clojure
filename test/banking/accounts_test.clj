@@ -1,11 +1,11 @@
 (ns banking.accounts-test
   "TDD specs for the functional core (decisions). Every decision is pure: it
-   takes the current repository plus inputs and returns either
+   takes the current ledger plus inputs and returns either
 
-     success  =>  {:repository <new-repo> :value <v> :effects [<effect> ...]}
+     success  =>  {:ledger <new-repo> :value <v> :effects [<effect> ...]}
      failure  =>  {:error <reason-keyword>}
 
-   The repository is modelled as a plain map of account-id -> account, an
+   The ledger is modelled as a plain map of account-id -> account, an
    account carries {:id :balance :inflow :outflow :transactions :created-at},
    and a transaction carries {:id :account-id :type :amount :created-at} with
    :type being :inflow or :outflow. Transactions are appended newest-last, and
@@ -28,26 +28,26 @@
 ;; --- fixtures -------------------------------------------------------------
 
 (defn- step
-  "Apply a decision as a setup step and return the resulting repository,
+  "Apply a decision as a setup step and return the resulting ledger,
    failing loudly if the step itself did not succeed."
   [repo f & args]
-  (let [{:keys [repository error]} (apply f repo args)]
+  (let [{:keys [ledger error]} (apply f repo args)]
     (assert (nil? error) (str "setup step failed: " error))
-    repository))
+    ledger))
 
 ;; --- U01 : create new accounts -------------------------------------------
 
 (deftest create-account
   (testing "creating with a fresh id succeeds"
-    (let [{:keys [value repository error]} (accounts/create-account {} "acc-1" (tick))]
+    (let [{:keys [value ledger error]} (accounts/create-account {} "acc-1" (tick))]
       (is (nil? error))
       (is (= "acc-1" value))
-      (is (some? (get repository "acc-1")))))
+      (is (some? (get ledger "acc-1")))))
 
   (testing "the new account starts empty (zero balance, no history)"
-    (let [{:keys [repository]} (accounts/create-account {} "acc-1" (tick))]
+    (let [{:keys [ledger]} (accounts/create-account {} "acc-1" (tick))]
       (is (match? {:id "acc-1" :balance 0 :inflow 0 :outflow 0 :transactions []}
-                  (get repository "acc-1")))))
+                  (get ledger "acc-1")))))
 
   (testing "emits a persist effect carrying the new account"
     (let [{:keys [effects]} (accounts/create-account {} "acc-1" (tick))]
@@ -65,7 +65,7 @@
                      (step accounts/deposit "acc-1" 100 (tick)))
           result (accounts/create-account repo "acc-1" (tick))]
       (is (match? {:error :account-already-exists} result))
-      (is (nil? (:repository result)))
+      (is (nil? (:ledger result)))
       (is (= 100 (:balance (get repo "acc-1")))))))
 
 ;; --- U02 : deposit money into accounts -----------------------------------
@@ -75,9 +75,9 @@
     (let [repo (-> {}
                    (step accounts/create-account "acc-1" (tick))
                    (step accounts/deposit "acc-1" 100 (tick)))
-          {:keys [repository]} (accounts/deposit repo "acc-1" 50 (tick))]
-      (is (= 150 (:balance (get repository "acc-1"))))
-      (is (= 150 (:inflow (get repository "acc-1"))))))
+          {:keys [ledger]} (accounts/deposit repo "acc-1" 50 (tick))]
+      (is (= 150 (:balance (get ledger "acc-1"))))
+      (is (= 150 (:inflow (get ledger "acc-1"))))))
 
   (testing "the returned balance reflects the new amount"
     (let [repo (step {} accounts/create-account "acc-1" (tick))
@@ -89,10 +89,10 @@
           first-ts  (tick)
           repo      (step repo accounts/deposit "acc-1" 100 first-ts)
           second-ts (tick)
-          {:keys [repository]} (accounts/deposit repo "acc-1" 50 second-ts)]
+          {:keys [ledger]} (accounts/deposit repo "acc-1" 50 second-ts)]
       (is (match? [{:account-id "acc-1" :type :inflow :amount 100 :created-at first-ts}
                    {:account-id "acc-1" :type :inflow :amount 50  :created-at second-ts}]
-                  (:transactions (get repository "acc-1"))))))
+                  (:transactions (get ledger "acc-1"))))))
 
   (testing "emits a persist effect carrying the inflow transaction"
     (let [repo (step {} accounts/create-account "acc-1" (tick))
@@ -117,28 +117,28 @@
     (let [repo (-> {}
                    (step accounts/create-account "acc-1" (tick))
                    (step accounts/deposit "acc-1" 100 (tick)))
-          {:keys [value repository]} (accounts/debit repo "acc-1" 40 (tick))]
+          {:keys [value ledger]} (accounts/debit repo "acc-1" 40 (tick))]
       (is (= 60 value))
-      (is (= 60 (:balance (get repository "acc-1"))))
-      (is (= 40 (:outflow (get repository "acc-1"))))))
+      (is (= 60 (:balance (get ledger "acc-1"))))
+      (is (= 40 (:outflow (get ledger "acc-1"))))))
 
   (testing "records an outflow transaction, keeping the prior history in order"
     (let [repo     (-> {}
                        (step accounts/create-account "acc-1" (tick))
                        (step accounts/deposit "acc-1" 100 (tick)))
           debit-ts (tick)
-          {:keys [repository]} (accounts/debit repo "acc-1" 40 debit-ts)]
+          {:keys [ledger]} (accounts/debit repo "acc-1" 40 debit-ts)]
       (is (match? [{:account-id "acc-1" :type :inflow  :amount 100}
                    {:account-id "acc-1" :type :outflow :amount 40 :created-at debit-ts}]
-                  (:transactions (get repository "acc-1"))))))
+                  (:transactions (get ledger "acc-1"))))))
 
-  (testing "debiting more than the balance fails and yields no new repository"
+  (testing "debiting more than the balance fails and yields no new ledger"
     (let [repo   (-> {}
                      (step accounts/create-account "acc-1" (tick))
                      (step accounts/deposit "acc-1" 30 (tick)))
           result (accounts/debit repo "acc-1" 100 (tick))]
       (is (match? {:error :insufficient-balance} result))
-      (is (nil? (:repository result)))))
+      (is (nil? (:ledger result)))))
 
   (testing "emits a persist effect carrying the outflow transaction"
     (let [repo (-> {}
@@ -168,9 +168,9 @@
                    (step accounts/create-account "acc-a" (tick))
                    (step accounts/create-account "acc-b" (tick))
                    (step accounts/deposit "acc-a" 100 (tick)))
-          {:keys [repository]} (accounts/transfer repo "acc-a" "acc-b" 40 (tick))]
-      (is (= 60 (:balance (get repository "acc-a"))))
-      (is (= 40 (:balance (get repository "acc-b"))))))
+          {:keys [ledger]} (accounts/transfer repo "acc-a" "acc-b" 40 (tick))]
+      (is (= 60 (:balance (get ledger "acc-a"))))
+      (is (= 40 (:balance (get ledger "acc-b"))))))
 
   (testing "the returned value is the source's new balance"
     (let [repo (-> {}
@@ -187,9 +187,9 @@
                    (step accounts/deposit "acc-a" 100 (tick)))
           before (+ (:balance (get repo "acc-a"))
                     (:balance (get repo "acc-b")))
-          {:keys [repository]} (accounts/transfer repo "acc-a" "acc-b" 40 (tick))
-          after (+ (:balance (get repository "acc-a"))
-                   (:balance (get repository "acc-b")))]
+          {:keys [ledger]} (accounts/transfer repo "acc-a" "acc-b" 40 (tick))
+          after (+ (:balance (get ledger "acc-a"))
+                   (:balance (get ledger "acc-b")))]
       (is (= before after))))
 
   (testing "records an outflow on the source and an inflow on the target"
@@ -198,12 +198,12 @@
                           (step accounts/create-account "acc-b" (tick))
                           (step accounts/deposit "acc-a" 100 (tick)))
           transfer-ts (tick)
-          {:keys [repository]} (accounts/transfer repo "acc-a" "acc-b" 40 transfer-ts)]
+          {:keys [ledger]} (accounts/transfer repo "acc-a" "acc-b" 40 transfer-ts)]
       (is (match? [{:account-id "acc-a" :type :inflow  :amount 100}
                    {:account-id "acc-a" :type :outflow :amount 40 :created-at transfer-ts}]
-                  (:transactions (get repository "acc-a"))))
+                  (:transactions (get ledger "acc-a"))))
       (is (match? [{:account-id "acc-b" :type :inflow :amount 40 :created-at transfer-ts}]
-                  (:transactions (get repository "acc-b"))))))
+                  (:transactions (get ledger "acc-b"))))))
 
   (testing "emits a persist effect for each leg, source then target"
     (let [repo (-> {}
@@ -223,7 +223,7 @@
                      (step accounts/deposit "acc-a" 100 (tick)))
           result (accounts/transfer repo "acc-a" "acc-b" 0 (tick))]
       (is (match? {:error :invalid-amount} result))
-      (is (nil? (:repository result)))
+      (is (nil? (:ledger result)))
       (is (= 100 (:balance (get repo "acc-a"))))))
 
   (testing "transferring to the same account fails, and no money moves"
@@ -232,7 +232,7 @@
                      (step accounts/deposit "acc-a" 100 (tick)))
           result (accounts/transfer repo "acc-a" "acc-a" 40 (tick))]
       (is (match? {:error :same-account} result))
-      (is (nil? (:repository result)))
+      (is (nil? (:ledger result)))
       (is (= 100 (:balance (get repo "acc-a"))))))
 
   (testing "transferring when the source lacks balance fails, and no money moves"
@@ -242,7 +242,7 @@
                      (step accounts/deposit "acc-a" 30 (tick)))
           result (accounts/transfer repo "acc-a" "acc-b" 100 (tick))]
       (is (match? {:error :insufficient-balance} result))
-      (is (nil? (:repository result)))
+      (is (nil? (:ledger result)))
       (is (= 30 (:balance (get repo "acc-a"))))
       (is (= 0 (:balance (get repo "acc-b"))))))
 

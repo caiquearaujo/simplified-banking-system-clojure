@@ -1,44 +1,52 @@
 (ns banking.repositories-test
-  "TDD specs for the imperative shell. `commit` is the only edge that mutates:
-   given a reference (an atom holding the repository) and a pure decision, it
+  "TDD specs for the imperative shell. The repository knows nothing about the
+   account operations: you read the current ledger, manipulate it freely with
+   the operations from `banking.accounts`, and only when you `commit` the result
+   does the bank change.
 
-     1. reads the current repository from the reference,
-     2. runs (decision repository & args),
-     3. on failure returns the failure map and touches nothing,
-     4. on success publishes the new repository to the reference (atomically),
-        runs each effect, and returns the decision's :value.
+   These specs pin down that contract:
 
-   The reference is passed to `commit` explicitly (rather than a namespace-level
-   atom) so these tests stay isolated and order-independent.
+     - manipulations do not touch the bank until commit;
+     - committing reflects the whole (manipulated) ledger, and the bank stays
+       consistent afterwards;
+     - if the manipulation ended in a failure, commit reflects nothing (so a
+       failure anywhere means the earlier steps never reach the bank);
+     - a result with no :persist effect is not reflected.
 
-   Every operation draws its timestamp from `tick`, so no two operations share
-   a timestamp anywhere in the suite."
-  (:require [clojure.test :refer [deftest testing is]]
+   The bank is a namespace-level atom, so each test resets it first. Every
+   operation draws its timestamp from `tick`, so no two operations share one."
+  (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [matcher-combinators.test :refer [match?]]
             [banking.fixtures :refer [tick]]
             [banking.repositories :as repositories]
             [banking.accounts :as accounts]))
 
-(deftest commit-returns-the-decision-value
-  (testing "success yields the decision's :value, not the whole success map"
-    (let [ref (atom {})]
-      (is (= "acc-1" (repositories/commit ref accounts/create-account "acc-1" (tick))))
-      (is (= 100 (repositories/commit ref accounts/deposit "acc-1" 100 (tick)))))))
+(use-fixtures :each (fn [run] (repositories/reset-bank!) (run)))
 
-(deftest state-is-visible-to-the-next-operation
-  (testing "a committed operation is visible to the next one"
-    (let [ref (atom {})]
-      (repositories/commit ref accounts/create-account "acc-1" (tick))
-      (repositories/commit ref accounts/deposit "acc-1" 100 (tick))
-      (repositories/commit ref accounts/deposit "acc-1" 25 (tick))
-      (is (= 125 (:balance (get @ref "acc-1")))))))
+(deftest a-manipulation-reaches-the-bank-only-on-commit
+  (testing "the ledger is manipulated freely, but the bank changes only at commit"
+    (let [r1 (accounts/create-account (repositories/ledger) "acc-1" (tick))
+          r2 (accounts/deposit (:ledger r1) "acc-1" 100 (tick))
+          r3 (accounts/deposit (:ledger r2) "acc-1" 25 (tick))]
+      ;; three operations happened, but nothing has touched the bank yet
+      (is (= {} (repositories/ledger)))
+      ;; commit reflects the whole manipulated ledger and returns the value
+      (is (= 125 (repositories/commit r3)))
+      (let [account (get (repositories/ledger) "acc-1")]
+        (is (= 125 (:balance account)))
+        (is (= 125 (:inflow account)))
+        (is (= 2 (count (:transactions account))))))))
 
-(deftest failure-preserves-stored-state
-  (testing "a failed operation leaves the stored state exactly as it was"
-    (let [ref (atom {})]
-      (repositories/commit ref accounts/create-account "acc-1" (tick))
-      (repositories/commit ref accounts/deposit "acc-1" 100 (tick))
-      (let [before @ref
-            result (repositories/commit ref accounts/deposit "ghost" 50 (tick))]
-        (is (match? {:error :account-not-found} result))
-        (is (= before @ref))))))
+(deftest a-failure-anywhere-persists-nothing
+  (testing "if a later step fails, the earlier successful ones never reach the bank"
+    (let [r1 (accounts/create-account (repositories/ledger) "acc-1" (tick))
+          r2 (accounts/deposit (:ledger r1) "acc-1" 100 (tick))
+          r3 (accounts/deposit (:ledger r2) "ghost" 50 (tick))]
+      (is (match? {:error :account-not-found} (repositories/commit r3)))
+      (is (= {} (repositories/ledger))))))
+
+(deftest committing-without-a-persist-effect-changes-nothing
+  (testing "a result carrying no :persist effect is not reflected into the bank"
+    (let [no-persist {:ledger {"acc-1" :tampered} :value :ok :effects []}]
+      (is (= :ok (repositories/commit no-persist)))
+      (is (= {} (repositories/ledger))))))
