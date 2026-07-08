@@ -166,3 +166,11 @@ State persistence (through commit)
 ```
 
 Now, I am ready to starting to code.
+
+### Update 1
+
+When designing the tests, I needed to define the shape of the input and output objects. I think this is always the most opportune time for that. In the proposed design, the focus is very different; it's about understanding the components. The implementation resides in the code. Naturally, I also made some minor changes to the original design to make it more idiomatic.
+
+Regarding the tests, I made a conscious decision to make them more "declarative". What I mean by that is that I explicitly designed the step-by-step process. I could have used helpers to do this in some cases, for example "fresh" (to create a repository with an account) or "funded" (to create an account with a pre-deposited value). I decided not to do it that way because I believe that tests should be read as a story, and direct manipulations are more relevant than helpers that package meaning. Of course, if we were in a more complex ecosystem, helpers would probably be the ideal choice.
+
+Initial tests are done.
