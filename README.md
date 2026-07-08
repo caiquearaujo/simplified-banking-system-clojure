@@ -180,3 +180,5 @@ Initial tests are done.
 - [X] Implementations for `banking.validations`;
 - [ ] Implementations for `banking.accounts`;
 - [ ] Implementations for `banking.repositories`.
+
+> The implementation phase of `banking.accounts` was the right time to define the shape of the effects that will be returned, as well as all the behavior. As I said before, the essential thing for us here is to persist the state; the rest maybe can be implemented sometime in the future, it's optional and doesn't violate the use cases.

@@ -49,6 +49,11 @@
       (is (match? {:id "acc-1" :balance 0 :inflow 0 :outflow 0 :transactions []}
                   (get repository "acc-1")))))
 
+  (testing "emits a persist effect carrying the new account"
+    (let [{:keys [effects]} (accounts/create-account {} "acc-1" (tick))]
+      (is (match? [[:persist :account {:id "acc-1" :balance 0 :inflow 0 :outflow 0 :transactions []}]]
+                  effects))))
+
   (testing "creating with an already-used id fails"
     (let [repo   (step {} accounts/create-account "acc-1" (tick))
           result (accounts/create-account repo "acc-1" (tick))]
@@ -89,6 +94,18 @@
                    {:account-id "acc-1" :type :inflow :amount 50  :created-at second-ts}]
                   (:transactions (get repository "acc-1"))))))
 
+  (testing "emits a persist effect carrying the inflow transaction"
+    (let [repo (step {} accounts/create-account "acc-1" (tick))
+          ts   (tick)
+          {:keys [effects]} (accounts/deposit repo "acc-1" 100 ts)]
+      (is (match? [[:persist :transaction {:account-id "acc-1" :type :inflow :amount 100 :created-at ts}]]
+                  effects))))
+
+  (testing "depositing an invalid amount fails"
+    (let [repo (step {} accounts/create-account "acc-1" (tick))]
+      (is (match? {:error :invalid-amount} (accounts/deposit repo "acc-1" 0 (tick))))
+      (is (match? {:error :invalid-amount} (accounts/deposit repo "acc-1" -50 (tick))))))
+
   (testing "depositing into a non-existing account fails"
     (is (match? {:error :account-not-found}
                 (accounts/deposit {} "ghost" 50 (tick))))))
@@ -122,6 +139,22 @@
           result (accounts/debit repo "acc-1" 100 (tick))]
       (is (match? {:error :insufficient-balance} result))
       (is (nil? (:repository result)))))
+
+  (testing "emits a persist effect carrying the outflow transaction"
+    (let [repo (-> {}
+                   (step accounts/create-account "acc-1" (tick))
+                   (step accounts/deposit "acc-1" 100 (tick)))
+          ts   (tick)
+          {:keys [effects]} (accounts/debit repo "acc-1" 40 ts)]
+      (is (match? [[:persist :transaction {:account-id "acc-1" :type :outflow :amount 40 :created-at ts}]]
+                  effects))))
+
+  (testing "debiting an invalid amount fails"
+    (let [repo (-> {}
+                   (step accounts/create-account "acc-1" (tick))
+                   (step accounts/deposit "acc-1" 100 (tick)))]
+      (is (match? {:error :invalid-amount} (accounts/debit repo "acc-1" 0 (tick))))
+      (is (match? {:error :invalid-amount} (accounts/debit repo "acc-1" -20 (tick))))))
 
   (testing "debiting a non-existing account fails"
     (is (match? {:error :account-not-found}
@@ -171,6 +204,27 @@
                   (:transactions (get repository "acc-a"))))
       (is (match? [{:account-id "acc-b" :type :inflow :amount 40 :created-at transfer-ts}]
                   (:transactions (get repository "acc-b"))))))
+
+  (testing "emits a persist effect for each leg, source then target"
+    (let [repo (-> {}
+                   (step accounts/create-account "acc-a" (tick))
+                   (step accounts/create-account "acc-b" (tick))
+                   (step accounts/deposit "acc-a" 100 (tick)))
+          ts   (tick)
+          {:keys [effects]} (accounts/transfer repo "acc-a" "acc-b" 40 ts)]
+      (is (match? [[:persist :transaction {:account-id "acc-a" :type :outflow :amount 40 :created-at ts}]
+                   [:persist :transaction {:account-id "acc-b" :type :inflow  :amount 40 :created-at ts}]]
+                  effects))))
+
+  (testing "transferring an invalid amount fails, and no money moves"
+    (let [repo   (-> {}
+                     (step accounts/create-account "acc-a" (tick))
+                     (step accounts/create-account "acc-b" (tick))
+                     (step accounts/deposit "acc-a" 100 (tick)))
+          result (accounts/transfer repo "acc-a" "acc-b" 0 (tick))]
+      (is (match? {:error :invalid-amount} result))
+      (is (nil? (:repository result)))
+      (is (= 100 (:balance (get repo "acc-a"))))))
 
   (testing "transferring to the same account fails, and no money moves"
     (let [repo   (-> {}
